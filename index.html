@@ -178,10 +178,11 @@ main{padding:16px 0 calc(96px + env(safe-area-inset-bottom,0px))}
 .fctl{display:flex;justify-content:center;gap:12px}
 .fctl button{width:56px;height:56px;border-radius:16px;background:var(--card);border:2px solid var(--rule);display:grid;place-items:center;font-size:1.3rem}
 .fctl svg{width:24px;height:24px}
-.pcard{background:var(--card);border:1px solid var(--rule);border-radius:16px;padding:14px;display:flex;gap:12px;align-items:flex-start;margin-bottom:10px}
+.pcard{background:var(--card);border:1px solid var(--rule);border-radius:16px;padding:14px;display:flex;gap:12px;align-items:flex-start;margin-bottom:10px;transition:outline-color .15s}
 .pcard .tx{flex:1}
 .pcard .en{font-weight:700;font-size:1.08rem}
 .pcard .tr{color:var(--mut)}
+.pcard.play{outline:3px solid var(--lc)}
 .mgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .mcol{display:grid;gap:10px}
 .mt{min-height:60px;padding:8px 10px;border-radius:14px;background:var(--card);border:2px solid var(--rule);border-bottom-width:4px;font-weight:600;font-size:.98rem;line-height:1.25;word-break:break-word}
@@ -1281,7 +1282,12 @@ function b_review(){
 }
 
 /* ---------- question generators ---------- */
-function qMcq(p,pool,dir){const others=pick(pool.filter(x=>x[0].toLowerCase()!==p[0].toLowerCase()&&x[1]!==p[1]),3);const ans=dir?p[0]:p[1];
+const hasNum=t=>/\d/.test(t);
+function qMcq(p,pool,dir){const ans=dir?p[0]:p[1];
+  const cand=pool.filter(x=>x[0].toLowerCase()!==p[0].toLowerCase()&&x[1]!==p[1]);
+  const wantNum=hasNum(ans),matched=cand.filter(x=>hasNum(dir?x[0]:x[1])===wantNum);
+  let others=pick(matched,Math.min(3,matched.length));
+  if(others.length<3){const used=new Set(others.map(o=>o[1]));others=others.concat(pick(cand.filter(x=>!used.has(x[1])),3-others.length))}
   return {t:"mcq",dir,prompt:dir?p[1]:p[0],ask:dir?"İngilizcesi hangisi?":"Bu ne demek?",answer:ans,opts:shuffle([ans,...others.map(o=>dir?o[0]:o[1])]),pair:p,speak:p[0]}}
 function qListen(p,pool){const others=pick(pool.filter(x=>x[0].toLowerCase()!==p[0].toLowerCase()),3);return {t:"listen",answer:p[0],opts:shuffle([p[0],...others.map(o=>o[0])]),pair:p,speak:p[0]}}
 function qBuild(p,pool){const tk=tokens(p[0]);const own=tk.map(norm);const extra=pick([...new Set(pool.flatMap(x=>tokens(x[0])).filter(w=>!own.includes(norm(w))))],2);
@@ -1292,7 +1298,7 @@ function qFill(p,pool){const tk=tokens(p[0]);const cand=tk.map((w,i)=>[w,i]).fil
   return {t:"fill",parts:[tk.slice(0,i).join(" "),w.replace(/^[A-Za-z']+/,""),tk.slice(i+1).join(" ")],tr:p[1],answer:ans,opts:shuffle([ans,...pick(all,3)]),pair:p,speak:p[0]}}
 function qReply(d,extra){if(d.length<3)return null;const i=Math.random()*(d.length-1)|0;const ans=d[i+1].en;
   let others=d.filter((x,j)=>j!==i&&j!==i+1).map(x=>x.en);others=pick(others,3);if(others.length<3)others=others.concat(pick(extra.map(x=>x[0]).filter(x=>x!==ans),3-others.length));
-  return {t:"reply",prev:d[i],answer:ans,opts:shuffle([ans,...others]),pair:[d[i+1].en,d[i+1].tr],speak:ans}}
+  return {t:"reply",prev:d[i],pre:d.slice(0,i+1),answer:ans,opts:shuffle([ans,...others]),pair:[d[i+1].en,d[i+1].tr],speak:ans}}
 function practiceSteps(items,dpool){const pool=dpool.length>=8?dpool:items.concat(ALLW);const it=pick(items,Math.min(items.length,10));const s=[];
   if(it.length>=4)s.push({t:"match",pairs:it.slice(0,5)});
   it.forEach((p,i)=>{const k=i%3;s.push(k===0?qMcq(p,pool,0):k===1?qMcq(p,pool,1):qListen(p,pool))});return s}
@@ -1391,7 +1397,16 @@ function rReal(s,sb){sb.innerHTML=`<p class="q-ask">🌍 Gerçek hayatta</p><p c
   ${s.items.map((r,i)=>`<button class="rcard" data-i="${i}"><span class="ctx">${esc(r.c)}</span><span class="ren">${esc(r.en)}</span><span class="rtr">${esc(r.tr)}</span><span class="rhint">Anlamını görmek için dokun</span></button>`).join("")}`;
   sb.querySelectorAll(".rcard").forEach(b=>b.onclick=()=>{b.classList.add("show");say(s.items[+b.dataset.i].en)});contBtn("Anladım")}
 function rPhrases(s,sb){sb.innerHTML=`<p class="q-ask">Kalıplar</p><p class="muted" style="margin-top:-8px">Bu cümleleri olduğu gibi ezberle, günlük hayatta hemen işine yarar.</p>
-  ${s.items.map(p=>`<div class="pcard"><div class="tx"><div class="en">${esc(p[0])}</div><div class="tr">${esc(p[1])}</div></div>${spkBtn(p[0])}</div>`).join("")}`;bindSay(sb);contBtn("Anladım")}
+  ${s.items.map((p,i)=>`<div class="pcard" data-i="${i}"><div class="tx"><div class="en">${esc(p[0])}</div><div class="tr">${esc(p[1])}</div></div>${spkBtn(p[0])}</div>`).join("")}`;
+  bindSay(sb);
+  let stopped=false;
+  foot(`<button class="btn pri" id="go">Anladım</button>`);
+  $("#go").onclick=()=>{stopped=true;try{speechSynthesis.cancel()}catch(e){}next()};
+  const cards=[...sb.querySelectorAll(".pcard")];let k=0;
+  const playNext=()=>{cards.forEach(c=>c.classList.remove("play"));if(stopped||k>=s.items.length)return;
+    const c=cards[k];c.classList.add("play");c.scrollIntoView({block:"nearest",behavior:"smooth"});
+    say(s.items[k][0],{end:()=>{if(stopped)return;k++;setTimeout(playNext,400)}})};
+  playNext()}
 function rMatch(s,sb){const ps=s.pairs;const L=shuffle(ps.map((p,k)=>[p[0],k])),Rr=shuffle(ps.map((p,k)=>[p[1],k]));let sel=null,left=ps.length;
   sb.innerHTML=`<p class="q-ask">Eşleştir</p><div class="mgrid"><div class="mcol">${L.map(([t,k])=>`<button class="mt" data-k="${k}" data-sd="L">${esc(t)}</button>`).join("")}</div><div class="mcol">${Rr.map(([t,k])=>`<button class="mt" data-k="${k}" data-sd="R">${esc(t)}</button>`).join("")}</div></div>`;
   foot(`<button class="btn pri" disabled>Tüm çiftleri eşleştir</button>`);
@@ -1412,8 +1427,9 @@ function rMcq(s,sb){sb.innerHTML=`<p class="q-ask">${s.ask}</p>${s.ctx?`<span cl
 function rListen(s,sb){sb.innerHTML=`<p class="q-ask">Dinle ve duyduğunu seç</p><div class="listen"><button class="bigspk" data-say="${esc(s.speak)}" aria-label="Dinle">${ICON.spk}</button><button class="slowb" data-say="${esc(s.speak)}" data-slow="1" aria-label="Yavaş dinle">🐢<span>Yavaş</span></button></div>${optsHtml(s)}`;bindSay(sb);bindOpts(s,sb);setTimeout(()=>say(s.speak),250)}
 function rFill(s,sb){sb.innerHTML=`<p class="q-ask">Boşluğu doldur</p><div class="q-sent">${esc(s.parts[0])} <span class="blank" id="blk">&nbsp;</span>${esc(s.parts[1])} ${esc(s.parts[2])}</div><p class="muted" style="margin:0 0 16px">${esc(s.tr)}</p>${optsHtml(s)}`;
   bindOpts(s,sb,s.speak,()=>{$("#blk").textContent=s.answer;say(s.speak)})}
-function rReply(s,sb){sb.innerHTML=`<p class="q-ask">Sohbete uygun cevabı seç</p><div class="dlg" style="margin-bottom:18px"><div class="bub a show"><span class="who">${s.prev.s}</span>${esc(s.prev.en)}<small class="tr">${esc(s.prev.tr)}</small></div></div>${optsHtml(s)}`;
-  bindOpts(s,sb,null,()=>say(s.answer));say(s.prev.en)}
+function rReply(s,sb){sb.innerHTML=`<p class="q-ask">Sohbete uygun cevabı seç</p><p class="muted small" style="margin-top:-8px">Önce diyaloğu oku, sırada ne söylenir?</p><div class="dlg" style="margin-bottom:18px">${s.pre.map((x,i)=>`<button class="bub ${x.s==="A"?"a":"b"} show" data-i="${i}"><span class="who">${x.s}</span>${esc(x.en)}<small class="tr">${esc(x.tr)}</small></button>`).join("")}</div>${optsHtml(s)}`;
+  sb.querySelectorAll(".dlg .bub").forEach(b=>b.onclick=()=>{const d=s.pre[+b.dataset.i];say(d.en,{pitch:d.s==="A"?1.1:.85})});
+  bindOpts(s,sb,null,()=>say(s.answer));const last=s.pre[s.pre.length-1];say(last.en,{pitch:last.s==="A"?1.1:.85})}
 function rBuild(s,sb){let ch=[];
   sb.innerHTML=`<p class="q-ask">Cümleyi kur</p><div class="q-tr">🇹🇷 ${esc(s.tr)}</div><div class="ans" id="ans"></div><div class="bank" id="bank"></div>`;
   const draw=()=>{$("#ans").innerHTML=ch.map((i,k)=>`<button class="wchip" data-k="${k}">${esc(s.bank[i])}</button>`).join("");
